@@ -21,6 +21,27 @@ class PiPolicyConfig(BasePolicyConfig):
 
             self.policy_cls = PI_Policy
 
+# added by Yang Zhang
+class PRTSPolicyConfig(BasePolicyConfig):
+    checkpoint_path: str = "checkpoints/prts"
+    # remote_config: None -> launch local server
+    # or dict(host,port) -> attaches to remote server
+    remote_config: dict | None = dict(host="localhost", port=8080)
+    grasping_type: str = "binary"
+    grasping_threshold: float = 0.5
+    chunk_size: int = 20
+
+    policy_cls: type = None
+    policy_type: str = "learned"
+
+    def model_post_init(self, __context) -> None:
+        """Set policy_cls after initialization to avoid circular imports."""
+        super().model_post_init(__context)
+        if self.policy_cls is None:
+            from molmo_spaces.policy.learned_policy.prts_policy import PRTS_Policy
+
+            self.policy_cls = PRTS_Policy
+
 
 class DreamZeroPolicyConfig(BasePolicyConfig):
     checkpoint_path: str = "checkpoints/dreamzero"

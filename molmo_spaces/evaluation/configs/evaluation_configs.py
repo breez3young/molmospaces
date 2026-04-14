@@ -37,6 +37,7 @@ from molmo_spaces.configs.policy_configs_baselines import (
     DreamZeroPolicyConfig,
     PiPolicyConfig,
     TeleopPolicyConfig,
+    PRTSPolicyConfig
 )
 from molmo_spaces.configs.robot_configs import (
     ActionNoiseConfig,
@@ -298,6 +299,20 @@ class DreamZeroPolicyEvalConfig(JsonBenchmarkEvalConfig):
     robot_config: FrankaRobotConfig = FrankaRobotConfig()
     policy_config: DreamZeroPolicyConfig = DreamZeroPolicyConfig()
     policy_dt_ms: float = 66.0
+
+    def model_post_init(self, __context):
+        super().model_post_init(__context)
+        self.robot_config.action_noise_config.enabled = False
+
+
+# added by Yang Zhang
+class PRTSPolicyEvalConfig(JsonBenchmarkEvalConfig):
+    robot_config: FrankaRobotConfig = FrankaRobotConfig()
+    policy_config: PRTSPolicyConfig = PRTSPolicyConfig()
+    # policy_dt_ms: float = 200.0  # Match your model's expected control rate
+    policy_dt_ms: float = 66.0  # ~15hz
+    end_on_success: bool = True  # End episode immediately upon success, ignoring task_horizon
+    use_wandb: bool = False
 
     def model_post_init(self, __context):
         super().model_post_init(__context)

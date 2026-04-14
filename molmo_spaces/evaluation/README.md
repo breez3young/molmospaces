@@ -82,6 +82,32 @@ Also, see `molmo_spaces/evaluation/configs/evaluation_configs.py` for more examp
 
 ---
 
+### Quick guide: run benchmark with PRTS (DROID serve)
+
+#### 1. Start PRTS policy server
+
+In your PRTS repo, launch the DROID server and keep it running:
+
+```bash
+python scripts/serve_policy.py --env droid --port 10000
+```
+
+If needed, explicitly pass a checkpoint via `policy:checkpoint` arguments in the same script.
+
+#### 2. Run benchmark in MolmoSpaces
+
+```bash
+python molmo_spaces/evaluation/eval_main.py \
+  molmo_spaces.evaluation.configs.evaluation_configs:PRTSPolicyEvalConfig \
+  --benchmark_dir assets/benchmarks/path-to-benchmark/ \
+  --task_horizon_steps 500
+```
+
+`PRTSPolicyConfig` defaults to `remote_config={"host": "localhost", "port": 10000}`
+to match the DROID `serve_policy.py` setup.
+
+---
+
 
 
 ## Implementing Eval in an External Repo

@@ -638,7 +638,7 @@ def run_evaluation(
             ckpt_name = "no_ckpt"
 
         wandb_run_name = f"{ckpt_name}_{timestamp}"
-        wandb.init(project=wandb_project, name=wandb_run_name)
+        wandb.init(project=wandb_project, name=wandb_run_name, mode="disabled")
         wandb.config.update(
             {
                 "checkpoint_path": resolved_checkpoint,
