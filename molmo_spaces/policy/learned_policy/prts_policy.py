@@ -35,6 +35,17 @@ class PRTS_Policy(PI_Policy):
     but keeps a dedicated policy identity for evaluation bookkeeping.
     """
 
+    def reset(self):
+        self.actions_buffer = None
+        self.current_buffer_index = 0
+        self.starting_time = None
+
+        # for eef pose control
+        self.init_tcp_pose = None
+        self.current_position = None
+        self.current_rotation = None
+
+
     def get_info(self) -> dict:
         info = super().get_info()
         if info.get("policy_name") in {None, "pi"}:
@@ -85,7 +96,20 @@ class PRTS_Policy(PI_Policy):
         #     log.warning(f"Failed to save exo image to {save_path}: {e}")
 
         # get eef pose state
-        eef_pose = ee_pose_to_xyzrpy(np.array(obs['robot_state']['ee_pose']))
+        # eef_pose = ee_pose_to_xyzrpy(np.array(obs['robot_state']['ee_pose']))
+
+        ## 下面的eef_pose就是 obs里面的tcp pose
+        tcp_pose = obs.get("tcp_pose", None)
+        
+        if tcp_pose is not None:
+            T_robot_tcp = np.eye(4)
+            T_robot_tcp[:3, :3] = R.from_quat(tcp_pose[3:], scalar_first=True).as_matrix()
+            T_robot_tcp[:3, 3] = tcp_pose[:3]
+            eef_pose = ee_pose_to_xyzrpy(T_robot_tcp)
+        else:
+            eef_pose = ee_pose_to_xyzrpy(np.array(obs["robot_state"]["ee_pose"]))
+        
+        print(f"eef pose (xyzrpy): {eef_pose}")
         obs_state = np.concatenate(
             [
                 eef_pose,
@@ -93,6 +117,11 @@ class PRTS_Policy(PI_Policy):
                 np.array([grip], dtype=eef_pose.dtype),
             ]
         )
+
+        if self.init_tcp_pose is None:
+            self.init_tcp_pose = T_robot_tcp.copy()
+            self.current_position = T_robot_tcp[:3, 3].copy()
+            self.current_rotation = T_robot_tcp[:3, :3].copy()
 
         model_input = {
             "observation/exterior_image_1_left": resize_with_pad(obs[exo_camera_key], 180, 320),
@@ -130,7 +159,12 @@ class PRTS_Policy(PI_Policy):
         )
         # target_xyzrpy = np.asarray(model_output[:6], dtype=np.float64).reshape(6)
         new_pose = xyzrpy_to_pose_matrix(model_output[:6].astype(np.float64))
+
+        # 可能要换成True
+        pred_delta_rotation = R.from_euler("xyz", model_output[:6][3:], degrees=False).as_matrix()
         
+        self.current_position += self.current_rotation @ model_output[:6][:3]
+        self.current_rotation = pred_delta_rotation @ self.current_rotation
 
         ## compute ik
         kinematics = self.task.env.current_robot.kinematics
@@ -139,13 +173,17 @@ class PRTS_Policy(PI_Policy):
         gripper_mgs = set(robot_view.get_gripper_movegroup_ids())
         mgs_except_gripper = [x for x in robot_view.move_group_ids() if x not in gripper_mgs]
 
+        new_pose = np.eye(4)
+        new_pose[:3, 3] = self.current_position
+        new_pose[:3, :3] = self.current_rotation
+
         jp = kinematics.ik(
             "arm",
             new_pose,
             mgs_except_gripper,
             robot_view.get_qpos_dict(),
             robot_view.base.pose,
-            rel_to_base=False,
+            rel_to_base=True,
         )
         action = robot_view.get_ctrl_dict()
         if jp is not None:

@@ -12,7 +12,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import imageio
 import mujoco
+import numpy as np
 
 # import mujoco.viewer
 import psutil
@@ -706,7 +708,78 @@ class ParallelRolloutRunner:
             datagen_profiler.start("rollout_total")
             datagen_profiler.start("rollout_reset")
 
+        video_writer = None
+        video_path = None
+        main_camera_key = "exo_camera_1"
+
+        def _unwrap_observation(obs: Any) -> Any:
+            if isinstance(obs, list | tuple) and len(obs) > 0:
+                return obs[0]
+            return obs
+
+        def _normalize_frame(frame: Any) -> np.ndarray | None:
+            if frame is None:
+                return None
+
+            frame_arr = np.asarray(frame)
+            if frame_arr.ndim == 2:
+                frame_arr = np.repeat(frame_arr[..., None], 3, axis=-1)
+
+            if frame_arr.ndim != 3:
+                return None
+
+            if frame_arr.shape[-1] == 1:
+                frame_arr = np.repeat(frame_arr, 3, axis=-1)
+            elif frame_arr.shape[-1] >= 4:
+                frame_arr = frame_arr[..., :3]
+            elif frame_arr.shape[-1] != 3:
+                return None
+
+            if frame_arr.dtype != np.uint8:
+                frame_arr = frame_arr.astype(np.float32)
+                max_val = float(np.max(frame_arr)) if frame_arr.size > 0 else 0.0
+                if max_val <= 1.0:
+                    frame_arr = frame_arr * 255.0
+                frame_arr = np.clip(frame_arr, 0.0, 255.0).astype(np.uint8)
+
+            return frame_arr
+
+        def _extract_main_camera_frame(obs: Any) -> tuple[str | None, np.ndarray | None]:
+            obs_dict = _unwrap_observation(obs)
+            if not isinstance(obs_dict, dict):
+                return None, None
+
+            if main_camera_key not in obs_dict:
+                return None, None
+
+            frame = _normalize_frame(obs_dict[main_camera_key])
+            if frame is None:
+                return None, None
+            return main_camera_key, frame
+
+        def _append_main_camera_frame(obs: Any) -> None:
+            nonlocal video_writer, video_path, main_camera_key
+
+            camera_key, frame = _extract_main_camera_frame(obs)
+            if frame is None:
+                return
+
+            if video_writer is None:
+                config = getattr(policy, "config", None)
+                output_dir = Path(getattr(config, "output_dir", "."))
+                stream_dir = output_dir / "stream_main_camera"
+                stream_dir.mkdir(parents=True, exist_ok=True)
+                video_path = stream_dir / f"episode_seed_{episode_seed}_{int(time.time() * 1000)}.mp4"
+                fps = float(getattr(config, "fps", 30.0))
+                video_writer = imageio.get_writer(video_path, format="ffmpeg", fps=fps, quality=5)
+                print(
+                    f"Streaming main camera video to {video_path} (camera_key={main_camera_key}, fps={fps})"
+                )
+
+            video_writer.append_data(frame)
+
         observation, _info = task.reset()
+        _append_main_camera_frame(observation)
 
         if datagen_profiler is not None:
             datagen_profiler.end("rollout_reset")
@@ -719,49 +792,58 @@ class ParallelRolloutRunner:
         except AttributeError:
             print("Not setting mujoco sleep. Needs version >=mujoco-3.8")
 
-        step_count = 0
-        while not task.is_done():
-            # Check for shutdown signal
-            if shutdown_event is not None and shutdown_event.is_set():
+        try:
+            step_count = 0
+            while not task.is_done():
+                # Check for shutdown signal
+                if shutdown_event is not None and shutdown_event.is_set():
+                    if datagen_profiler is not None:
+                        datagen_profiler.end("rollout_total")
+                    return False
+
+                # Step with policy
+                if profiler is not None:
+                    profiler.start("policy_get_action")
                 if datagen_profiler is not None:
-                    datagen_profiler.end("rollout_total")
-                return False
+                    datagen_profiler.start("policy_get_action")
+                action_cmd = policy.get_action(observation)
+                if profiler is not None:
+                    profiler.end("policy_get_action")
+                if datagen_profiler is not None:
+                    datagen_profiler.end("policy_get_action")
 
-            # Step with policy
-            if profiler is not None:
-                profiler.start("policy_get_action")
-            if datagen_profiler is not None:
-                datagen_profiler.start("policy_get_action")
-            action_cmd = policy.get_action(observation)
-            if profiler is not None:
-                profiler.end("policy_get_action")
-            if datagen_profiler is not None:
-                datagen_profiler.end("policy_get_action")
+                # Step the task
+                if profiler is not None:
+                    profiler.start("task_step")
+                if datagen_profiler is not None:
+                    datagen_profiler.start("task_step")
+                if action_cmd is None:
+                    print("Policy returned None action, ending episode")
+                    break
+                observation, reward, terminal, truncated, infos = task.step(action_cmd)
+                _append_main_camera_frame(observation)
+                if profiler is not None:
+                    profiler.end("task_step")
+                if datagen_profiler is not None:
+                    datagen_profiler.end("task_step")
 
-            # Step the task
-            if profiler is not None:
-                profiler.start("task_step")
-            if datagen_profiler is not None:
-                datagen_profiler.start("task_step")
-            if action_cmd is None:
-                print("Policy returned None action, ending episode")
-                break
-            observation, reward, terminal, truncated, infos = task.step(action_cmd)
-            if profiler is not None:
-                profiler.end("task_step")
-            if datagen_profiler is not None:
-                datagen_profiler.end("task_step")
+                step_count += 1
+                # Add termination if succ
+                if end_on_success and "success" in infos[0] and infos[0]["success"]:
+                    success = True
+                    break
 
-            step_count += 1
-            # Add termination if succ
-            if end_on_success and "success" in infos[0] and infos[0]["success"]:
-                success = True
-                break
+                if viewer is not None:
+                    viewer.sync()
 
-            if viewer is not None:
-                viewer.sync()
+                print(
+                    f"Step {step_count}, task internal step count {task.episode_step_count} / {task._task_horizon}: infos={infos}"
+                )
+        finally:
+            if video_writer is not None:
+                video_writer.close()
+                print(f"Finished streaming video: {video_path}")
 
-            print(f"Step {step_count}, task internal step count {task.episode_step_count} / {task._task_horizon}: infos={infos}")
         try:
             task.env.current_model.opt.enableflags &= ~int(mujoco.mjtEnableBit.mjENBL_SLEEP)
         except AttributeError:
