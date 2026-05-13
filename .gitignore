@@ -6,6 +6,7 @@ dist/
 debug/
 debug*/
 assets/*
+logs/
 
 # If you're adding things to git under external_src, please do this
 # explicitly by running git add -f <files>, this is to prevent
