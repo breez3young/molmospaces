@@ -129,6 +129,7 @@ class PRTS_Policy(PI_Policy):
             "observation/state": obs_state,
             "prompt": prompt.lower(),
         }
+        import ipdb; ipdb.set_trace()
         return model_input
     
     def inference_model(self, model_input):

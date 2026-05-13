@@ -771,7 +771,13 @@ class ParallelRolloutRunner:
                 stream_dir.mkdir(parents=True, exist_ok=True)
                 video_path = stream_dir / f"episode_seed_{episode_seed}_{int(time.time() * 1000)}.mp4"
                 fps = float(getattr(config, "fps", 30.0))
-                video_writer = imageio.get_writer(video_path, format="ffmpeg", fps=fps, quality=5)
+                # Cap ffmpeg encoding threads — default `-threads auto` (= ncpus, e.g. 192)
+                # storms pthread_create across parallel workers and triggers EAGAIN under
+                # cgroup pids.max. 2 threads encode this tiny 624x352@15fps stream fine.
+                video_writer = imageio.get_writer(
+                    video_path, format="ffmpeg", fps=fps, quality=5,
+                    output_params=["-threads", "2"],
+                )
                 print(
                     f"Streaming main camera video to {video_path} (camera_key={main_camera_key}, fps={fps})"
                 )
