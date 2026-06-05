@@ -32,7 +32,7 @@ class PRTSPolicyConfig(BasePolicyConfig):
     remote_config: dict | None = dict(host="localhost", port=10000)
     grasping_type: str = "binary"
     grasping_threshold: float = 0.5
-    chunk_size: int = 16
+    chunk_size: int = 24 # 16
 
     policy_cls: type = None
     policy_type: str = "learned"
@@ -56,41 +56,6 @@ class PRTSPolicyConfig(BasePolicyConfig):
             from molmo_spaces.policy.learned_policy.prts_policy_joint import PRTS_Policy
 
             self.policy_cls = PRTS_Policy
-
-
-
-class PRTSPolicyConfig_CK8(BasePolicyConfig):
-    checkpoint_path: str = "checkpoints/prts"
-    # remote_config: None -> launch local server
-    # or dict(host,port) -> attaches to remote server
-    remote_config: dict | None = dict(host="localhost", port=10000)
-    grasping_type: str = "binary"
-    grasping_threshold: float = 0.5
-    chunk_size: int = 8
-
-    policy_cls: type = None
-    policy_type: str = "learned"
-
-    def model_post_init(self, __context) -> None:
-        """Set policy_cls after initialization to avoid circular imports."""
-        super().model_post_init(__context)
-        # Allow parallel runners (e.g. run_all_molmospaces.sh) to point each eval
-        # process at its own policy server without editing this file.
-        if self.remote_config is not None:
-            env_host = os.environ.get("PRTS_POLICY_HOST")
-            env_port = os.environ.get("PRTS_POLICY_PORT")
-            if env_host:
-                self.remote_config["host"] = env_host
-            if env_port:
-                try:
-                    self.remote_config["port"] = int(env_port)
-                except ValueError:
-                    pass
-        if self.policy_cls is None:
-            from molmo_spaces.policy.learned_policy.prts_policy_joint import PRTS_Policy
-
-            self.policy_cls = PRTS_Policy
-
 
 
 class DreamZeroPolicyConfig(BasePolicyConfig):

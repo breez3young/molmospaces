@@ -842,9 +842,9 @@ class ParallelRolloutRunner:
                 if viewer is not None:
                     viewer.sync()
 
-                print(
-                    f"Step {step_count}, task internal step count {task.episode_step_count} / {task._task_horizon}: infos={infos}"
-                )
+                # print(
+                #     f"Step {step_count}, task internal step count {task.episode_step_count} / {task._task_horizon}: infos={infos}"
+                # )
         finally:
             if video_writer is not None:
                 video_writer.close()

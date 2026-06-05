@@ -526,7 +526,9 @@ def save_frames_to_mp4(
     try:
         # Try using ffmpeg plugin explicitly
         writer = imageio.get_writer(
-            file_path, format="ffmpeg", fps=fps, quality=5, **(extra_kwargs if extra_kwargs else {})
+            file_path, format="ffmpeg", fps=fps, quality=5,
+            # codec="libx264", output_params=["-threads", "2"],
+            **(extra_kwargs if extra_kwargs else {})
         )
         for frame in frames:
             writer.append_data(frame)
